@@ -22,6 +22,7 @@ static int ballY = 120; // Position initiale de la bille, c'est une variable glo
 static int score = 0; // Score du joueur, c'est une variable globale car elle va être mise à jour pendant le jeu
 static bool mpuOk = false; // Indique si le MPU6050 est bien connecté
 static bool gameWon = false; // Indique si le joueur a gagné
+static bool gameStarted = false; // Indique si le joueur a appuyé sur le bouton pour commencer le jeu
 
 // Visible dans updateGame() pour gérer les pénalités
 static int penaltyCounter = 0; // Compteur de temps hors zone, c'est une variable globale car elle doit être mise à jour pendant le jeu
@@ -51,6 +52,66 @@ static unsigned long lastZoneMoveTime = 0; // Dernier moment où la zone a été
 
 // Déplacement maximum de la zone à chaque fois qu'elle se déplace, unité pixels
 const int ZONE_MOVE_STEP = 60;
+
+void createGameScreen();
+
+void startGameEventHandler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED)
+    {
+        lv_obj_clean(lv_screen_active()); // Effacer le menu avant d'afficher le jeu
+
+        ballX = 230;
+        ballY = 120;
+        zoneX = 160;
+        zoneY = 80;
+        score = 0;
+        penaltyCounter = 0;
+        gameWon = false;
+        gameStarted = true;
+        lastZoneMoveTime = millis();
+
+        createGameScreen();
+    }
+}
+
+void createMenuScreen()
+{
+    lv_obj_t *screen = lv_screen_active();
+
+    // couleur de fond
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0xEDEDED), LV_PART_MAIN);
+
+    // Titre du menu
+    lv_obj_t *title = lv_label_create(screen);
+    lv_label_set_text(title, "Jeu d'equilibre");
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 45);
+
+    // Petite explication
+    lv_obj_t *info = lv_label_create(screen);
+    lv_label_set_text(info, "Inclinez la carte pour garder la bille dans la zone verte");
+    lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 85);
+
+    // Bouton pour commencer
+    lv_obj_t *startButton = lv_button_create(screen);
+    lv_obj_set_size(startButton, 150, 50);
+    lv_obj_align(startButton, LV_ALIGN_CENTER, 0, 25);
+    lv_obj_add_event_cb(startButton, startGameEventHandler, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *label = lv_label_create(startButton);
+    lv_label_set_text(label, "Commencer");
+    lv_obj_center(label);
+
+    // Message si le capteur n'est pas détecté
+    if (!mpuOk)
+    {
+        lv_obj_t *mpuLabel = lv_label_create(screen);
+        lv_label_set_text(mpuLabel, "MPU6050 non detecte");
+        lv_obj_align(mpuLabel, LV_ALIGN_BOTTOM_MID, 0, -15);
+    }
+}
 
 void createGameScreen()
 {
@@ -95,7 +156,6 @@ void createGameScreen()
     lv_obj_clear_flag(ball, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(ball, ballX, ballY);
 }
-
 
 void moveZoneRandomly()
 {
@@ -154,7 +214,6 @@ bool isBallNearZoneBorder()
 
     return minDistance < 20;
 }
-
 
 void updateGame(float accelX, float accelY)
 {
@@ -225,7 +284,6 @@ void updateGame(float accelX, float accelY)
         lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFD0D0), LV_PART_MAIN);
     }
 
-
     if (score >= 300)
     {
         score = 300;
@@ -270,11 +328,7 @@ void mySetup()
         mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
     }
 
-    createGameScreen();
-
-    if (!mpuOk) {
-        lv_label_set_text(statusLabel, "MPU6050 non detecte");
-    }
+    createMenuScreen();
 }
 
 void loop()
@@ -289,7 +343,7 @@ void myTask(void *pvParameters)
 
     while (1)
     {
-        if (mpuOk)
+        if (mpuOk && gameStarted)
         {
             sensors_event_t a, g, temp;
             mpu.getEvent(&a, &g, &temp);
