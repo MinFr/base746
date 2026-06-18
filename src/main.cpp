@@ -15,14 +15,23 @@ static lv_obj_t *zone; // Objet de la zone de score, c'est une variable globale 
 
 static lv_obj_t *scoreLabel; // Objet de label du score, c'est une variable globale car on doit le mettre à jour pendant le jeu
 static lv_obj_t *statusLabel; // Objet de label du titre en bas, c'est une variable globale car on doit le mettre à jour pendant le jeu
+static lv_obj_t *timerLabel; // Objet de label du temps, c'est une variable globale car on doit le mettre à jour pendant le jeu
+static lv_obj_t *restartButton; // Bouton pour recommencer après la fin du jeu
 
 static int ballX = 230; // Position initiale de la bille, c'est une variable globale car elle va se déplacer pendant le jeu
-static int ballY = 120; // Position initiale de la bille, c'est une variable globale car elle va se déplacer pendant le jeu
+static int ballY = 120; 
 
 static int score = 0; // Score du joueur, c'est une variable globale car elle va être mise à jour pendant le jeu
 static bool mpuOk = false; // Indique si le MPU6050 est bien connecté
 static bool gameWon = false; // Indique si le joueur a gagné
 static bool gameStarted = false; // Indique si le joueur a appuyé sur le bouton pour commencer le jeu
+
+static unsigned long gameStartTime = 0; // Moment où la partie commence, utilisé pour calculer le temps de jeu
+static bool restartButtonCreated = false; // Indique si le bouton recommencer a déjà été créé
+
+// Valeurs de offset pour corriger la position inclinée du MPU6050
+// A modifier petit à petit selon le comportement de la bille
+const float OFFSET_X = 3.5;
 
 // Visible dans updateGame() pour gérer les pénalités
 static int penaltyCounter = 0; // Compteur de temps hors zone, c'est une variable globale car elle doit être mise à jour pendant le jeu
@@ -55,6 +64,40 @@ const int ZONE_MOVE_STEP = 60;
 
 void createGameScreen();
 
+void resetGameVariables()
+{
+    ballX = 230;
+    ballY = 120;
+    zoneX = 160;
+    zoneY = 80;
+    score = 0;
+    penaltyCounter = 0;
+    gameWon = false;
+    gameStarted = true;
+    restartButtonCreated = false;
+    lastZoneMoveTime = millis();
+    gameStartTime = millis();
+
+    ball = NULL;
+    zone = NULL;
+    scoreLabel = NULL;
+    statusLabel = NULL;
+    timerLabel = NULL;
+    restartButton = NULL;
+}
+
+void restartGameEventHandler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED)
+    {
+        lv_obj_clean(lv_screen_active()); // Effacer l'écran de fin avant de recommencer
+        resetGameVariables();
+        createGameScreen();
+    }
+}
+
 void startGameEventHandler(lv_event_t * e)
 {
     lv_event_code_t code = lv_event_get_code(e);
@@ -62,17 +105,7 @@ void startGameEventHandler(lv_event_t * e)
     if (code == LV_EVENT_CLICKED)
     {
         lv_obj_clean(lv_screen_active()); // Effacer le menu avant d'afficher le jeu
-
-        ballX = 230;
-        ballY = 120;
-        zoneX = 160;
-        zoneY = 80;
-        score = 0;
-        penaltyCounter = 0;
-        gameWon = false;
-        gameStarted = true;
-        lastZoneMoveTime = millis();
-
+        resetGameVariables();
         createGameScreen();
     }
 }
@@ -115,7 +148,7 @@ void createMenuScreen()
 
 void createGameScreen()
 {
-    lv_obj_t *screen = lv_screen_active(); // Récupère l'écran actif pour y ajouter les éléments du jeu
+    lv_obj_t *screen = lv_screen_active(); // Récupère l'écran actif
 
     // couleur de fond
     lv_obj_set_style_bg_color(screen, lv_color_hex(0xEDEDED), LV_PART_MAIN);
@@ -129,6 +162,11 @@ void createGameScreen()
     scoreLabel = lv_label_create(screen);
     lv_label_set_text(scoreLabel, "Score: 0");
     lv_obj_align(scoreLabel, LV_ALIGN_TOP_LEFT, 15, 10);
+
+    // Temps
+    timerLabel = lv_label_create(screen);
+    lv_label_set_text(timerLabel, "Temps: 0s");
+    lv_obj_align(timerLabel, LV_ALIGN_TOP_RIGHT, -15, 10);
 
     // Etat du jeu
     statusLabel = lv_label_create(screen);
@@ -212,7 +250,7 @@ bool isBallNearZoneBorder()
     if (distanceTop < minDistance) minDistance = distanceTop;
     if (distanceBottom < minDistance) minDistance = distanceBottom;
 
-    return minDistance < 20;
+    return minDistance < 10;
 }
 
 void updateGame(float accelX, float accelY)
@@ -222,6 +260,12 @@ void updateGame(float accelX, float accelY)
     }
 
     unsigned long now = millis();
+
+    // Mise à jour du temps
+    unsigned long elapsedTime = (now - gameStartTime) / 1000;
+    char timerBuffer[32];
+    snprintf(timerBuffer, sizeof(timerBuffer), "Temps: %lus", elapsedTime);
+    lv_label_set_text(timerLabel, timerBuffer);
 
     // Déplacement aléatoire de la zone
     if (now - lastZoneMoveTime > ZONE_MOVE_INTERVAL)
@@ -235,10 +279,10 @@ void updateGame(float accelX, float accelY)
     ballY += (int)(accelX * SENSIBILITY);
 
     // Limites écran
-    if (ballX < 0) ballX = 0; // On laisse une marge de 0 pixels à gauche pour que la bille puisse toucher le bord
-    if (ballY < 35) ballY = 35; // On laisse une marge de 35 pixels en haut pour que la bille puisse toucher le bord sans être cachée par le titre (10 pixels de marge + 25 pixels de hauteur du titre)
+    if (ballX < 0) ballX = 0; // On laisse une marge de 0 pixels à GAUCHE pour que la bille puisse toucher le bord
+    if (ballY < 35) ballY = 35; // On laisse une marge de 35 pixels EN HAUT pour que la bille puisse toucher le bord sans être cachée par le titre (10 pixels de marge + 25 pixels de hauteur du titre)
 
-    if (ballX > SCREEN_W - BALL_SIZE) { // On laisse une marge de 0 pixels à droite pour que la bille puisse toucher le bord
+    if (ballX > SCREEN_W - BALL_SIZE) { // On laisse une marge de 0 pixels à DROITE pour que la bille puisse toucher le bord
         ballX = SCREEN_W - BALL_SIZE;
     }
 
@@ -293,6 +337,20 @@ void updateGame(float accelX, float accelY)
         lv_label_set_text(statusLabel, "Tu gagnes!");
         lv_obj_set_style_bg_color(screen, lv_color_hex(0xCFFFD0), LV_PART_MAIN);
 
+        if (!restartButtonCreated)
+        {
+            restartButton = lv_button_create(screen);
+            lv_obj_set_size(restartButton, 150, 45);
+            lv_obj_align(restartButton, LV_ALIGN_CENTER, 0, 35);
+            lv_obj_add_event_cb(restartButton, restartGameEventHandler, LV_EVENT_CLICKED, NULL);
+
+            lv_obj_t *restartLabel = lv_label_create(restartButton);
+            lv_label_set_text(restartLabel, "Recommencer");
+            lv_obj_center(restartLabel);
+
+            restartButtonCreated = true;
+        }
+
         lv_obj_set_pos(ball, ballX, ballY);
         return;
     }
@@ -318,7 +376,7 @@ void mySetup()
 
     if (!mpu.begin()) {
         Serial.println("MPU6050 NOT FOUND");
-        mpuOk = false;
+        mpuOk = false;  
     } else {
         Serial.println("MPU6050 FOUND");
         mpuOk = true;
@@ -357,7 +415,7 @@ void myTask(void *pvParameters)
 
             if (lvglLock(pdMS_TO_TICKS(20)))
             {
-                updateGame(a.acceleration.x, a.acceleration.y);
+                updateGame(a.acceleration.x - OFFSET_X, a.acceleration.y);
                 lvglUnlock();
             }
         }
